@@ -1,0 +1,13 @@
+{
+  "name": "nader-calendar-monitor",
+  "version": "1.0.0",
+  "description": "Monitor Google Appointment Schedule for earlier openings",
+  "main": "monitor.js",
+  "scripts": {
+    "monitor": "node monitor.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "playwright": "^1.44.0"
+  }
+}
