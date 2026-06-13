@@ -12,8 +12,7 @@ const LAST_NAME = process.env.LAST_NAME || '';
 const EMAIL_ADDRESS = process.env.EMAIL_ADDRESS || '';
 const PHONE_NUMBER = process.env.PHONE_NUMBER || '';
 const PROPOSED_GRAFTS = process.env.PROPOSED_GRAFTS || '';
-const AUTO_BOOK_DAYS = ['Thursday', 'Friday'];
-const AUTO_BOOK_AFTER = { month: 9, day: 20 }; // auto-book only dates after September 20
+const AUTO_BOOK_MIN_DAYS_OUT = 7; // auto-book only dates more than this many days from today
 
 if (!APPOINTMENT_URL) {
   console.error('APPOINTMENT_URL not set in .env');
@@ -152,11 +151,14 @@ async function bookAppointment(page, dayName, monthDay, year) {
     displayDate = date;
   }
 
-  // Auto-book only dates that are Thursday or Friday AND after Sept 20 of that year
+  // Auto-book any date more than AUTO_BOOK_MIN_DAYS_OUT days from today
   let shouldAutoBook = false;
   if (parsed && dateObj && !isNaN(dateObj)) {
-    const threshold = new Date(dateObj.getFullYear(), AUTO_BOOK_AFTER.month - 1, AUTO_BOOK_AFTER.day);
-    shouldAutoBook = dateObj > threshold && AUTO_BOOK_DAYS.includes(parsed.dayName);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const threshold = new Date(today);
+    threshold.setDate(threshold.getDate() + AUTO_BOOK_MIN_DAYS_OUT);
+    shouldAutoBook = dateObj > threshold;
   }
 
   const last = loadState();
@@ -186,7 +188,7 @@ async function bookAppointment(page, dayName, monthDay, year) {
     const msg = `@everyone ✅ **Auto-booked ${displayDate}** at Nader Medical! (Phone: ${PHONE_NUMBER}, Grafts: ${PROPOSED_GRAFTS})\n${APPOINTMENT_URL}`;
     await sendDiscord(msg);
   } else if (bookingOutcome === 'failed') {
-    const msg = `@everyone ⚠️ Found a matching date **${displayDate}** (Thu/Fri after 9/20) but auto-booking FAILED — please book it manually!\n${APPOINTMENT_URL}`;
+    const msg = `@everyone ⚠️ Found a matching date **${displayDate}** (more than a week out) but auto-booking FAILED — please book it manually!\n${APPOINTMENT_URL}`;
     await sendDiscord(msg);
   } else if (hasAvailability && (isNew || dateChanged)) {
     const weekdayNote = parsed ? (isWeekday ? ' (weekday)' : ' (weekend)') : '';
