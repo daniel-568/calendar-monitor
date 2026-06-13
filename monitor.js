@@ -80,127 +80,135 @@ async function bookAppointment(page, dayName, monthDay, year) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: !!process.env.CI });
-  const page = await (await browser.newContext()).newPage();
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: !!process.env.CI });
+    const page = await (await browser.newContext()).newPage();
 
-  console.log('Loading appointment page...');
-  await page.goto(APPOINTMENT_URL, { waitUntil: 'networkidle', timeout: 30000 });
-  await page.waitForTimeout(2000);
+    console.log('Loading appointment page...');
+    await page.goto(APPOINTMENT_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(2000);
 
-  console.log('Clicking jump to next available date...');
-  await page.getByText('Jump to the next bookable date').click({ timeout: 10000 }).catch(() => {
-    console.log('Jump button not found — no available dates may exist.');
-  });
-  await page.waitForTimeout(4000);
+    console.log('Clicking jump to next available date...');
+    await page.getByText('Jump to the next bookable date').click({ timeout: 10000 }).catch(() => {
+      console.log('Jump button not found — no available dates may exist.');
+    });
+    await page.waitForTimeout(4000);
 
-  // Find available date buttons and extract date from calendar UI
-  const { parsed, hasAvailability } = await page.evaluate(() => {
-    // Calendar day buttons look like: "16, Tuesday, no available times" or "16, Tuesday, 1 time available"
-    const datePattern = /^(\d+), (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i;
-    const allDateBtns = [...document.querySelectorAll('button[aria-label]')]
-      .filter(el => datePattern.test(el.getAttribute('aria-label') || ''));
+    // Find available date buttons and extract date from calendar UI
+    const { parsed, hasAvailability } = await page.evaluate(() => {
+      // Calendar day buttons look like: "16, Tuesday, no available times" or "16, Tuesday, 1 time available"
+      const datePattern = /^(\d+), (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i;
+      const allDateBtns = [...document.querySelectorAll('button[aria-label]')]
+        .filter(el => datePattern.test(el.getAttribute('aria-label') || ''));
 
-    const availableBtns = allDateBtns.filter(el =>
-      !(el.getAttribute('aria-label') || '').toLowerCase().includes('no available times')
-    );
+      const availableBtns = allDateBtns.filter(el =>
+        !(el.getAttribute('aria-label') || '').toLowerCase().includes('no available times')
+      );
 
-    if (availableBtns.length === 0) return { parsed: null, hasAvailability: false };
+      if (availableBtns.length === 0) return { parsed: null, hasAvailability: false };
 
-    // Get month/year from calendar heading
-    const monthYearRe = /(January|February|March|April|May|June|July|August|September|October|November|December) \d{4}/i;
-    let monthYear = null;
-    for (const el of document.querySelectorAll('h1, h2, h3, [role="heading"]')) {
-      const m = (el.textContent || '').match(monthYearRe);
-      if (m) { monthYear = m[0]; break; }
+      // Get month/year from calendar heading
+      const monthYearRe = /(January|February|March|April|May|June|July|August|September|October|November|December) \d{4}/i;
+      let monthYear = null;
+      for (const el of document.querySelectorAll('h1, h2, h3, [role="heading"]')) {
+        const m = (el.textContent || '').match(monthYearRe);
+        if (m) { monthYear = m[0]; break; }
+      }
+      // Also scan full body text as fallback for month/year
+      if (!monthYear) {
+        const m = document.body.innerText.match(monthYearRe);
+        if (m) monthYear = m[0];
+      }
+
+      const label = availableBtns[0].getAttribute('aria-label') || '';
+      const dm = label.match(/^(\d+), (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i);
+      if (dm && monthYear) {
+        const [month, year] = monthYear.split(' ');
+        return { parsed: { dayName: dm[2], monthDay: `${month} ${dm[1]}`, year }, hasAvailability: true };
+      }
+
+      return { parsed: null, hasAvailability: true };
+    });
+
+    let date = null;
+    let displayDate = null;
+    let isWeekday = false;
+    let dateObj = null;
+
+    if (parsed) {
+      dateObj = new Date(`${parsed.monthDay}, ${parsed.year}`);
+      if (!isNaN(dateObj)) {
+        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(dateObj.getDate()).padStart(2, '0');
+        const yy = String(dateObj.getFullYear()).slice(-2);
+        date = `${mm}/${dd}/${yy}`;
+        isWeekday = !['Saturday', 'Sunday'].includes(parsed.dayName);
+        displayDate = `${parsed.dayName}, ${date}`;
+      }
     }
-    // Also scan full body text as fallback for month/year
-    if (!monthYear) {
-      const m = document.body.innerText.match(monthYearRe);
-      if (m) monthYear = m[0];
+
+    if (!date) {
+      date = 'an upcoming date';
+      displayDate = date;
     }
 
-    const label = availableBtns[0].getAttribute('aria-label') || '';
-    const dm = label.match(/^(\d+), (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i);
-    if (dm && monthYear) {
-      const [month, year] = monthYear.split(' ');
-      return { parsed: { dayName: dm[2], monthDay: `${month} ${dm[1]}`, year }, hasAvailability: true };
+    // Auto-book any date more than AUTO_BOOK_MIN_DAYS_OUT days from today
+    let shouldAutoBook = false;
+    if (parsed && dateObj && !isNaN(dateObj)) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const threshold = new Date(today);
+      threshold.setDate(threshold.getDate() + AUTO_BOOK_MIN_DAYS_OUT);
+      shouldAutoBook = dateObj > threshold;
     }
 
-    return { parsed: null, hasAvailability: true };
-  });
+    const last = loadState();
+    const isNew = !last?.hasAvailability;
+    const dateChanged = last?.date !== date;
+    const alreadyBooked = last?.bookedDate === date;
 
-  let date = null;
-  let displayDate = null;
-  let isWeekday = false;
-  let dateObj = null;
+    let bookedDate = last?.bookedDate || null;
+    let bookingOutcome = null; // 'booked' | 'failed' | null
 
-  if (parsed) {
-    dateObj = new Date(`${parsed.monthDay}, ${parsed.year}`);
-    if (!isNaN(dateObj)) {
-      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-      const dd = String(dateObj.getDate()).padStart(2, '0');
-      const yy = String(dateObj.getFullYear()).slice(-2);
-      date = `${mm}/${dd}/${yy}`;
-      isWeekday = !['Saturday', 'Sunday'].includes(parsed.dayName);
-      displayDate = `${parsed.dayName}, ${date}`;
+    if (hasAvailability && shouldAutoBook && !alreadyBooked) {
+      try {
+        await bookAppointment(page, parsed.dayName, parsed.monthDay, parsed.year);
+        bookedDate = date;
+        bookingOutcome = 'booked';
+      } catch (err) {
+        console.error('Auto-booking failed:', err.message);
+        bookingOutcome = 'failed';
+        await page.screenshot({ path: 'booking-error.png' }).catch(() => {});
+      }
     }
-  }
 
-  if (!date) {
-    date = 'an upcoming date';
-    displayDate = date;
-  }
+    const result = { hasAvailability, date, checkedAt: new Date().toISOString(), bookedDate };
+    console.log(JSON.stringify(result, null, 2));
 
-  // Auto-book any date more than AUTO_BOOK_MIN_DAYS_OUT days from today
-  let shouldAutoBook = false;
-  if (parsed && dateObj && !isNaN(dateObj)) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const threshold = new Date(today);
-    threshold.setDate(threshold.getDate() + AUTO_BOOK_MIN_DAYS_OUT);
-    shouldAutoBook = dateObj > threshold;
-  }
-
-  const last = loadState();
-  const isNew = !last?.hasAvailability;
-  const dateChanged = last?.date !== date;
-  const alreadyBooked = last?.bookedDate === date;
-
-  let bookedDate = last?.bookedDate || null;
-  let bookingOutcome = null; // 'booked' | 'failed' | null
-
-  if (hasAvailability && shouldAutoBook && !alreadyBooked) {
-    try {
-      await bookAppointment(page, parsed.dayName, parsed.monthDay, parsed.year);
-      bookedDate = date;
-      bookingOutcome = 'booked';
-    } catch (err) {
-      console.error('Auto-booking failed:', err.message);
-      bookingOutcome = 'failed';
-      await page.screenshot({ path: 'booking-error.png' }).catch(() => {});
+    if (bookingOutcome === 'booked') {
+      const msg = `@everyone ✅ **Auto-booked ${displayDate}** at Nader Medical! (Phone: ${PHONE_NUMBER}, Grafts: ${PROPOSED_GRAFTS})\n${APPOINTMENT_URL}`;
+      await sendDiscord(msg);
+    } else if (bookingOutcome === 'failed') {
+      const msg = `@everyone ⚠️ Found a matching date **${displayDate}** (more than a week out) but auto-booking FAILED — please book it manually!\n${APPOINTMENT_URL}`;
+      await sendDiscord(msg);
+    } else if (hasAvailability && (isNew || dateChanged)) {
+      const weekdayNote = parsed ? (isWeekday ? ' (weekday)' : ' (weekend)') : '';
+      const msg = `@everyone 📅 **${displayDate}**${weekdayNote} is available at Nader Medical!\n${APPOINTMENT_URL}`;
+      console.log('New availability — sending notification...');
+      await sendDiscord(msg);
+    } else if (hasAvailability) {
+      console.log('Availability unchanged — no notification sent.');
+    } else {
+      console.log('No availability found.');
     }
+
+    saveState(result);
+  } catch (err) {
+    console.error('Monitor crashed:', err.message);
+    await sendDiscord(`⚠️ Monitor crashed: ${err.message}\n${APPOINTMENT_URL}`).catch(() => {});
+    throw err;
+  } finally {
+    if (browser) await browser.close();
   }
-
-  const result = { hasAvailability, date, checkedAt: new Date().toISOString(), bookedDate };
-  console.log(JSON.stringify(result, null, 2));
-
-  if (bookingOutcome === 'booked') {
-    const msg = `@everyone ✅ **Auto-booked ${displayDate}** at Nader Medical! (Phone: ${PHONE_NUMBER}, Grafts: ${PROPOSED_GRAFTS})\n${APPOINTMENT_URL}`;
-    await sendDiscord(msg);
-  } else if (bookingOutcome === 'failed') {
-    const msg = `@everyone ⚠️ Found a matching date **${displayDate}** (more than a week out) but auto-booking FAILED — please book it manually!\n${APPOINTMENT_URL}`;
-    await sendDiscord(msg);
-  } else if (hasAvailability && (isNew || dateChanged)) {
-    const weekdayNote = parsed ? (isWeekday ? ' (weekday)' : ' (weekend)') : '';
-    const msg = `@everyone 📅 **${displayDate}**${weekdayNote} is available at Nader Medical!\n${APPOINTMENT_URL}`;
-    console.log('New availability — sending notification...');
-    await sendDiscord(msg);
-  } else if (hasAvailability) {
-    console.log('Availability unchanged — no notification sent.');
-  } else {
-    console.log('No availability found.');
-  }
-
-  saveState(result);
-  await browser.close();
 })();
