@@ -5,6 +5,10 @@ on:
     - cron: '*/15 * * * *'  # every 15 minutes
   workflow_dispatch:         # manual trigger from GitHub UI
 
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
