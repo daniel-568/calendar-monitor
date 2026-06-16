@@ -58,13 +58,16 @@ async function bookAppointment(page, dayName, monthDay, year) {
   console.log(`Attempting to book ${dateLabel}...`);
 
   const dateList = page.locator(`div[role="list"][aria-label="${dateLabel}"]`).first();
+  await dateList.waitFor({ state: 'visible', timeout: 15000 });
   await dateList.scrollIntoViewIfNeeded();
 
   const slot = dateList.locator('[role="listitem"], button').first();
+  await slot.waitFor({ state: 'visible', timeout: 10000 });
   await slot.click();
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(4000);
   await page.screenshot({ path: 'booking-form.png' }).catch(() => {});
 
+  await page.getByLabel('First name').waitFor({ state: 'visible', timeout: 15000 });
   await page.getByLabel('First name').fill(FIRST_NAME);
   await page.getByLabel('Last name').fill(LAST_NAME);
   await page.getByLabel('Email address').fill(EMAIL_ADDRESS);
@@ -72,8 +75,10 @@ async function bookAppointment(page, dayName, monthDay, year) {
   await page.getByLabel('Proposed number of grafts').fill(PROPOSED_GRAFTS);
   await page.screenshot({ path: 'booking-form-filled.png' }).catch(() => {});
 
-  await page.getByRole('button', { name: 'Book', exact: true }).click();
-  await page.waitForTimeout(3000);
+  const bookBtn = page.getByRole('button', { name: 'Book', exact: true });
+  await bookBtn.waitFor({ state: 'visible', timeout: 10000 });
+  await bookBtn.click();
+  await page.waitForTimeout(5000);
   await page.screenshot({ path: 'booking-confirmation.png' }).catch(() => {});
 
   console.log('Booking submitted.');

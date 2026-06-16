@@ -42,6 +42,15 @@ jobs:
           PROPOSED_GRAFTS: ${{ secrets.PROPOSED_GRAFTS }}
         run: node monitor.js
 
+      - name: Upload booking screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: booking-screenshots
+          path: "*.png"
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Save state back to repo
         run: |
           git config user.name "github-actions[bot]"
