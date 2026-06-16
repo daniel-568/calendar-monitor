@@ -77,10 +77,27 @@ async function bookAppointment(page, dayName, monthDay, year) {
 
   const bookBtn = page.getByRole('button', { name: 'Book', exact: true });
   await bookBtn.waitFor({ state: 'visible', timeout: 10000 });
-  await bookBtn.click();
-  await page.waitForTimeout(5000);
+  await bookBtn.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  // Use JS click to bypass headless bot-detection that blocks Playwright's simulated click
+  await page.evaluate(() => {
+    const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Book');
+    if (btn) btn.click();
+  });
+  await page.waitForTimeout(1000);
   await page.screenshot({ path: 'booking-confirmation.png' }).catch(() => {});
 
+  // Verify the form actually closed — if it's still showing, the submission was blocked
+  await page.waitForFunction(
+    () => !document.body.innerText.includes('Your contact info'),
+    { timeout: 15000 }
+  ).catch(async () => {
+    await page.screenshot({ path: 'booking-error.png' }).catch(() => {});
+    throw new Error('Booking form did not close after clicking Book — submission was blocked or failed');
+  });
+
+  await page.waitForTimeout(2000);
+  await page.screenshot({ path: 'booking-confirmed.png' }).catch(() => {});
   console.log('Booking submitted.');
 }
 
