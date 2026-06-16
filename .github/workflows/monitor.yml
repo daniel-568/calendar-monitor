@@ -40,7 +40,7 @@ jobs:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           PHONE_NUMBER: ${{ secrets.PHONE_NUMBER }}
           PROPOSED_GRAFTS: ${{ secrets.PROPOSED_GRAFTS }}
-        run: node monitor.js
+        run: xvfb-run --auto-servernum node monitor.js
 
       - name: Upload booking screenshots
         if: always()

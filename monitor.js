@@ -104,7 +104,7 @@ async function bookAppointment(page, dayName, monthDay, year) {
 (async () => {
   let browser;
   try {
-    browser = await chromium.launch({ headless: !!process.env.CI });
+    browser = await chromium.launch({ headless: false });
     const page = await (await browser.newContext()).newPage();
 
     console.log('Loading appointment page...');
