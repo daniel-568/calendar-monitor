@@ -1,6 +1,6 @@
 {
-  "hasAvailability": false,
-  "date": "an upcoming date",
-  "checkedAt": "2026-06-16T14:03:02.250Z",
-  "bookedDate": null
+  "hasAvailability": true,
+  "date": "06/30/26",
+  "checkedAt": "2026-06-16T14:05:01.848Z",
+  "bookedDate": "06/30/26"
 }
