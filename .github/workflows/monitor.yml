@@ -35,21 +35,7 @@ jobs:
           CI: true
           APPOINTMENT_URL: ${{ secrets.APPOINTMENT_URL }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          FIRST_NAME: ${{ secrets.FIRST_NAME }}
-          LAST_NAME: ${{ secrets.LAST_NAME }}
-          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
-          PHONE_NUMBER: ${{ secrets.PHONE_NUMBER }}
-          PROPOSED_GRAFTS: ${{ secrets.PROPOSED_GRAFTS }}
         run: xvfb-run --auto-servernum node monitor.js
-
-      - name: Upload booking screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: booking-screenshots
-          path: "*.png"
-          if-no-files-found: ignore
-          retention-days: 3
 
       - name: Save state back to repo
         run: |

@@ -7,13 +7,6 @@ const APPOINTMENT_URL = process.env.APPOINTMENT_URL;
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
 const STATE_FILE = 'last_result.json';
 
-const FIRST_NAME = process.env.FIRST_NAME || '';
-const LAST_NAME = process.env.LAST_NAME || '';
-const EMAIL_ADDRESS = process.env.EMAIL_ADDRESS || '';
-const PHONE_NUMBER = process.env.PHONE_NUMBER || '';
-const PROPOSED_GRAFTS = process.env.PROPOSED_GRAFTS || '';
-const AUTO_BOOK_MIN_DAYS_OUT = 7; // auto-book only dates more than this many days from today
-
 if (!APPOINTMENT_URL) {
   console.error('APPOINTMENT_URL not set in .env');
   process.exit(1);
@@ -47,58 +40,6 @@ async function sendDiscord(message) {
     req.end();
   });
   console.log('Discord notification sent.');
-}
-
-async function bookAppointment(page, dayName, monthDay, year) {
-  if (!FIRST_NAME || !LAST_NAME || !EMAIL_ADDRESS || !PHONE_NUMBER) {
-    throw new Error('Booking PII not configured — set FIRST_NAME/LAST_NAME/EMAIL_ADDRESS/PHONE_NUMBER env vars (secrets in CI, .env locally)');
-  }
-
-  const dateLabel = `${dayName}, ${monthDay}, ${year}`;
-  console.log(`Attempting to book ${dateLabel}...`);
-
-  const dateList = page.locator(`div[role="list"][aria-label="${dateLabel}"]`).first();
-  await dateList.waitFor({ state: 'visible', timeout: 15000 });
-  await dateList.scrollIntoViewIfNeeded();
-
-  const slot = dateList.locator('[role="listitem"], button').first();
-  await slot.waitFor({ state: 'visible', timeout: 10000 });
-  await slot.click();
-  await page.waitForTimeout(4000);
-  await page.screenshot({ path: 'booking-form.png' }).catch(() => {});
-
-  await page.getByLabel('First name').waitFor({ state: 'visible', timeout: 15000 });
-  await page.getByLabel('First name').fill(FIRST_NAME);
-  await page.getByLabel('Last name').fill(LAST_NAME);
-  await page.getByLabel('Email address').fill(EMAIL_ADDRESS);
-  await page.getByLabel('Phone number').fill(PHONE_NUMBER);
-  await page.getByLabel('Proposed number of grafts').fill(PROPOSED_GRAFTS);
-  await page.screenshot({ path: 'booking-form-filled.png' }).catch(() => {});
-
-  const bookBtn = page.getByRole('button', { name: 'Book', exact: true });
-  await bookBtn.waitFor({ state: 'visible', timeout: 10000 });
-  await bookBtn.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(500);
-  // Use JS click to bypass headless bot-detection that blocks Playwright's simulated click
-  await page.evaluate(() => {
-    const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Book');
-    if (btn) btn.click();
-  });
-  await page.waitForTimeout(1000);
-  await page.screenshot({ path: 'booking-confirmation.png' }).catch(() => {});
-
-  // Verify the form actually closed — if it's still showing, the submission was blocked
-  await page.waitForFunction(
-    () => !document.body.innerText.includes('Your contact info'),
-    { timeout: 15000 }
-  ).catch(async () => {
-    await page.screenshot({ path: 'booking-error.png' }).catch(() => {});
-    throw new Error('Booking form did not close after clicking Book — submission was blocked or failed');
-  });
-
-  await page.waitForTimeout(2000);
-  await page.screenshot({ path: 'booking-confirmed.png' }).catch(() => {});
-  console.log('Booking submitted.');
 }
 
 (async () => {
@@ -175,46 +116,14 @@ async function bookAppointment(page, dayName, monthDay, year) {
       displayDate = date;
     }
 
-    // Auto-book any date more than AUTO_BOOK_MIN_DAYS_OUT days from today
-    let shouldAutoBook = false;
-    if (parsed && dateObj && !isNaN(dateObj)) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const threshold = new Date(today);
-      threshold.setDate(threshold.getDate() + AUTO_BOOK_MIN_DAYS_OUT);
-      shouldAutoBook = dateObj > threshold;
-    }
-
     const last = loadState();
     const isNew = !last?.hasAvailability;
     const dateChanged = last?.date !== date;
-    const alreadyBooked = last?.bookedDate === date;
 
-    let bookedDate = last?.bookedDate || null;
-    let bookingOutcome = null; // 'booked' | 'failed' | null
-
-    if (hasAvailability && shouldAutoBook && !alreadyBooked) {
-      try {
-        await bookAppointment(page, parsed.dayName, parsed.monthDay, parsed.year);
-        bookedDate = date;
-        bookingOutcome = 'booked';
-      } catch (err) {
-        console.error('Auto-booking failed:', err.message);
-        bookingOutcome = 'failed';
-        await page.screenshot({ path: 'booking-error.png' }).catch(() => {});
-      }
-    }
-
-    const result = { hasAvailability, date, checkedAt: new Date().toISOString(), bookedDate };
+    const result = { hasAvailability, date, checkedAt: new Date().toISOString() };
     console.log(JSON.stringify(result, null, 2));
 
-    if (bookingOutcome === 'booked') {
-      const msg = `@everyone ✅ **Auto-booked ${displayDate}** at Nader Medical! (Phone: ${PHONE_NUMBER}, Grafts: ${PROPOSED_GRAFTS})\n${APPOINTMENT_URL}`;
-      await sendDiscord(msg);
-    } else if (bookingOutcome === 'failed') {
-      const msg = `@everyone ⚠️ Found a matching date **${displayDate}** (more than a week out) but auto-booking FAILED — please book it manually!\n${APPOINTMENT_URL}`;
-      await sendDiscord(msg);
-    } else if (hasAvailability && (isNew || dateChanged)) {
+    if (hasAvailability && (isNew || dateChanged)) {
       const weekdayNote = parsed ? (isWeekday ? ' (weekday)' : ' (weekend)') : '';
       const msg = `@everyone 📅 **${displayDate}**${weekdayNote} is available at Nader Medical!\n${APPOINTMENT_URL}`;
       console.log('New availability — sending notification...');
